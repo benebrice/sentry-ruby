@@ -101,6 +101,35 @@ RSpec.describe Sentry::HTTPTransport do
       end
     end
 
+    context "receive 429 response" do
+      let(:stubs) do
+        Faraday::Adapter::Test::Stubs.new do |stub|
+          stub.post('sentry/api/42/envelope/') do
+            [
+              429, headers, "{\"detail\":\"event rejected due to rate limit\"}"
+            ]
+          end
+        end
+      end
+      context "with x-sentry-rate-limits header" do
+        let(:headers) do
+          {
+            "server"=>"nginx",
+            "retry-after"=>"48",
+            "x-sentry-rate-limits"=> "48:default;error;security:organization:smart_rate_limit",
+            "access-control-expose-headers"=>"x-sentry-rate-limits, retry-after, x-sentry-error",
+            "x-envoy-upstream-service-time"=>"1",
+          }
+        end
+
+        it "sets rate limits to the transport" do
+          expect { subject.send_data(data) }.to raise_error(Sentry::ExternalError, /the server responded with status 500/)
+
+          stubs.verify_stubbed_calls
+        end
+      end
+    end
+
     context "receive 5xx responses" do
       let(:stubs) do
         Faraday::Adapter::Test::Stubs.new do |stub|

@@ -6,14 +6,17 @@ module Sentry
     GZIP_ENCODING = "gzip"
     GZIP_THRESHOLD = 1024 * 30
     CONTENT_TYPE = 'application/x-sentry-envelope'
+    RETRY_AFTER_HEADER = "retry-after"
+    RATE_LIMIT_HEADER = "x-sentry-rate-limits"
 
-    attr_reader :conn, :adapter
+    attr_reader :conn, :adapter, :rate_limits
 
     def initialize(*args)
       super
       @adapter = @transport_configuration.http_adapter || Faraday.default_adapter
       @conn = set_conn
       @endpoint = @dsn.envelope_endpoint
+      @rate_limits = {}
     end
 
     def send_data(data)
@@ -34,14 +37,29 @@ module Sentry
       error_info = e.message
 
       if e.response
-        error_info += "\nbody: #{e.response[:body]}"
-        error_info += " Error in headers is: #{e.response[:headers]['x-sentry-error']}" if e.response[:headers]['x-sentry-error']
+        if has_rate_limited_header?(e.response)
+          handle_sentry_response(e.response)
+        else
+          error_info += "\nbody: #{e.response[:body]}"
+          error_info += " Error in headers is: #{e.response[:headers]['x-sentry-error']}" if e.response[:headers]['x-sentry-error']
+        end
       end
 
       raise Sentry::ExternalError, error_info
     end
 
     private
+
+    def has_rate_limited_header?(response)
+      response.dig(:headers, RETRY_AFTER_HEADER) || response.dig(:headers, RATE_LIMIT_HEADER)
+    end
+
+    def handle_sentry_response(response)
+      if rate_limit_header = response.dig(:headers, RATE_LIMIT_HEADER)
+        binding.pry
+
+      end
+    end
 
     def should_compress?(data)
       @transport_configuration.encoding == GZIP_ENCODING && data.bytesize >= GZIP_THRESHOLD
